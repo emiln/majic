@@ -1,6 +1,8 @@
-(ns majic.core)
+(ns majic.core
+  (:require [majic.parser :refer [card-by-id]]
+            [clojure.pprint :refer [pprint]]))
 
-(defn foo
-  "I don't do a whole lot."
-  [x]
-  (println x "Hello, World!"))
+(defn -main
+  [& args]
+  (let [id (Integer/parseInt (first args))]
+  	(pprint (card-by-id id))))

@@ -9,9 +9,12 @@
 (def id-string
   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_%sRow")
 
+(def exp-string
+  "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol")
+
 (defn- html-artist
   [id parsed-html]
-  (->
+  (some->
     (sel/select
       (sel/child
         (sel/id (format id-string id))
@@ -22,7 +25,7 @@
 
 (defn- html-name
   [id parsed-html]
-  (->
+  (some->
     (sel/select
       (sel/child
         (sel/id (format id-string id))
@@ -30,21 +33,48 @@
       parsed-html)
     first :content first str/trim))
 
-(defn- html-expansion
+(defn- html-flavor
   [id parsed-html]
-  (->
+  (some->
     (sel/select
       (sel/child
         (sel/id (format id-string id))
         (sel/class "value")
-        (sel/tag :div)
-        (sel/nth-child 2))
+        (sel/tag "div")
+        (sel/tag "i"))
       parsed-html)
     first :content first str/trim))
 
+(defn- html-expansion
+  [id parsed-html]
+  (->>
+    (map
+      (fn [e]
+        (when (= (-> e :content first type) java.lang.String)
+          (-> e :content first)))
+      (sel/select
+        (sel/child
+          (sel/id exp-string)
+          (sel/tag :a))
+        parsed-html))
+    (filter identity)))
+
+(defn- html-expansions
+  [id parsed-html]
+  (some->
+    (sel/select
+      (sel/child
+        (sel/id (format id-string id))
+        (sel/class "value")
+        (sel/tag "div"))
+      parsed-html)
+    first :content
+    (#(map (comp :title :attrs first :content) %))
+    (#(filter (complement nil?) %))))
+
 (defn- html-rarity
   [id parsed-html]
-  (->
+  (some->
     (sel/select
       (sel/child
         (sel/id (format id-string id))
@@ -74,6 +104,8 @@
           hick/as-hickory)]
     {:artist
      (html-artist "artist" parsed)
+     :flavor
+     (html-flavor "flavor" parsed)
      :name
      (html-name "name" parsed)
      :mana-cost
@@ -88,6 +120,8 @@
      (html-name "type" parsed)
      :expansion
      (html-expansion "set" parsed)
+     :all-sets
+     (html-expansions "otherSets" parsed)
      :rarity
      (html-rarity "rarity" parsed)
      :rules

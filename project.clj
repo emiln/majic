@@ -7,4 +7,4 @@
   :dependencies
     [[org.clojure/clojure "1.5.1"]
      [hickory "0.5.1"]]
-  :main majic.parser)
+  :main majic.core)
