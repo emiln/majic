@@ -33,6 +33,21 @@
       parsed-html)
     first :content first str/trim))
 
+(defn- html-types
+  [id parsed-html]
+  (into #{}
+    (some->
+      (sel/select
+        (sel/child
+          (sel/id (format id-string id))
+          (sel/class "value"))
+        parsed-html)
+      first :content first str/trim
+      (#(re-seq #"\w+" %))
+      (#(map str/trim %))
+      (#(map str/lower-case %))
+      (#(map keyword %)))))
+
 (defn- html-flavor
   [id parsed-html]
   (some->
@@ -55,6 +70,7 @@
       parsed-html)
     first :content first str/trim
     (#(re-seq #"\d" %))))
+
 (defn- html-expansion
   [id parsed-html]
   (->>
@@ -95,14 +111,34 @@
 
 (defn- html-mana-cost
   [id parsed-html]
+  (some->>
+    (sel/select
+      (sel/child
+        (sel/id (format id-string id))
+        (sel/class "value"))
+      parsed-html)
+    first :content rest
+    (map :attrs)
+    (map :alt)
+    (map
+      #(if (#{\0 \1 \2 \3 \4 \5 \6 \7 \8 \9} (first %))
+        (repeat (Integer/parseInt %) "colorless")
+        %))
+    flatten
+    (map str/lower-case)
+    (map #(str/replace % #"\s+" "-"))
+    (map keyword)
+    frequencies))
+
+(defn- html-rules
+  [id parsed-html]
   (->>
     (sel/select
       (sel/child
         (sel/id (format id-string id))
         (sel/class "value"))
       parsed-html)
-    first :content
-    (drop 1)))
+    first :content rest))
 
 (defn card-by-id
   [id]
@@ -119,15 +155,11 @@
      :name
      (html-name "name" parsed)
      :mana-cost
-     (map
-       (fn [elem]
-         (-> elem
-           :attrs :alt))
-       (html-mana-cost "mana" parsed))
+     (html-mana-cost "mana" parsed)
      :converted-mana-cost
      (html-name "cmc" parsed)
      :types
-     (html-name "type" parsed)
+     (html-types "type" parsed)
      :expansion
      (html-expansion "set" parsed)
      :all-sets
@@ -139,4 +171,4 @@
      :rules
      (map
        (fn [elem] (:content elem))
-       (html-mana-cost "text" parsed))}))
+       (html-rules "text" parsed))}))
