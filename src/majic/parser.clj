@@ -45,6 +45,16 @@
       parsed-html)
     first :content first str/trim))
 
+(defn- html-power-toughness
+  [id parsed-html]
+  (some->
+    (sel/select
+      (sel/child
+        (sel/id (format id-string id))
+        (sel/class "value"))
+      parsed-html)
+    first :content first str/trim
+    (#(re-seq #"\d" %))))
 (defn- html-expansion
   [id parsed-html]
   (->>
@@ -122,9 +132,11 @@
      (html-expansion "set" parsed)
      :all-sets
      (html-expansions "otherSets" parsed)
+     :power (first (html-power-toughness "pt" parsed))
+     :toughness (second (html-power-toughness "pt" parsed))
      :rarity
      (html-rarity "rarity" parsed)
      :rules
      (map
-       (fn [elem] elem)
+       (fn [elem] (:content elem))
        (html-mana-cost "text" parsed))}))
