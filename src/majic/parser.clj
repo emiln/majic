@@ -1,6 +1,6 @@
 (ns majic.parser
   (require [hickory.core :as hick]
-           [hickory.select :as sel]
+           [hickory.select :as sel :refer [child id select tag]]
            [clojure.string :as str]))
 
 (def url
@@ -12,109 +12,139 @@
 (def exp-string
   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol")
 
+(defn- string->keyword
+  [s]
+  (or (some-> s
+        str/lower-case
+        str/trim
+        (str/replace #"\s+" "-")
+        keyword)
+      :unknown))
+
+(defn- string->edition
+  [s]
+  (some->> s
+    (re-seq #"([\w\s]+)\(([\w\s]+)\)")
+    (map (fn [[_ a b]]
+           {(string->keyword a)
+            (string->keyword b)}))
+    first))
+
 (defn- html-artist
-  [id parsed-html]
+  [html-id parsed-html]
   (some->
-    (sel/select
-      (sel/child
-        (sel/id (format id-string id))
+    (select
+      (child
+        (id (format id-string html-id))
         (sel/class "value")
-        (sel/tag :a))
+        (tag :a))
       parsed-html)
     first :content first str/trim))
 
 (defn- html-name
-  [id parsed-html]
+  [html-id parsed-html]
   (some->
-    (sel/select
-      (sel/child
-        (sel/id (format id-string id))
+    (select
+      (child
+        (id (format id-string html-id))
         (sel/class "value"))
       parsed-html)
     first :content first str/trim))
 
+(defn- html-converted-mana-cost
+  [html-id parsed-html]
+  (some->
+    (select
+      (child
+        (id (format id-string html-id))
+        (sel/class "value"))
+      parsed-html)
+    first :content first str/trim
+    (Integer/parseInt)))
+
 (defn- html-types
-  [id parsed-html]
+  [html-id parsed-html]
   (into #{}
-    (some->
-      (sel/select
-        (sel/child
-          (sel/id (format id-string id))
+    (some->>
+      (select
+        (child
+          (id (format id-string html-id))
           (sel/class "value"))
         parsed-html)
       first :content first str/trim
-      (#(re-seq #"\w+" %))
-      (#(map str/trim %))
-      (#(map str/lower-case %))
-      (#(map keyword %)))))
+      (re-seq #"\w+")
+      (map string->keyword))))
 
 (defn- html-flavor
-  [id parsed-html]
+  [html-id parsed-html]
   (some->
-    (sel/select
-      (sel/child
-        (sel/id (format id-string id))
+    (select
+      (child
+        (id (format id-string html-id))
         (sel/class "value")
-        (sel/tag "div")
-        (sel/tag "i"))
+        (tag "div")
+        (tag "i"))
       parsed-html)
     first :content first str/trim))
 
 (defn- html-power-toughness
-  [id parsed-html]
-  (some->
-    (sel/select
-      (sel/child
-        (sel/id (format id-string id))
+  [html-id parsed-html]
+  (some->>
+    (select
+      (child
+        (id (format id-string html-id))
         (sel/class "value"))
       parsed-html)
     first :content first str/trim
-    (#(re-seq #"\d" %))))
+    (re-seq #"\d")
+    (map #(Integer/parseInt %))))
 
 (defn- html-expansion
-  [id parsed-html]
+  [html-id parsed-html]
   (->>
     (map
       (fn [e]
         (when (= (-> e :content first type) java.lang.String)
           (-> e :content first)))
-      (sel/select
-        (sel/child
-          (sel/id exp-string)
-          (sel/tag :a))
+      (select
+        (child
+          (id exp-string)
+          (tag :a))
         parsed-html))
-    (filter identity)))
+    (filter identity)
+    first string->keyword))
 
 (defn- html-expansions
-  [id parsed-html]
-  (some->
-    (sel/select
-      (sel/child
-        (sel/id (format id-string id))
+  [html-id parsed-html]
+  (some->>
+    (select
+      (child
+        (id (format id-string html-id))
         (sel/class "value")
-        (sel/tag "div"))
+        (tag "div"))
       parsed-html)
     first :content
-    (#(map (comp :title :attrs first :content) %))
-    (#(filter (complement nil?) %))))
+    (map (comp string->edition :title :attrs first :content))
+    (filter (complement nil?))
+    (apply merge)))
 
 (defn- html-rarity
-  [id parsed-html]
+  [html-id parsed-html]
   (some->
-    (sel/select
-      (sel/child
-        (sel/id (format id-string id))
+    (select
+      (child
+        (id (format id-string html-id))
         (sel/class "value")
-        (sel/tag :span))
+        (tag :span))
       parsed-html)
-    first :content first str/trim))
+    first :content first str/trim string->keyword))
 
 (defn- html-mana-cost
-  [id parsed-html]
+  [html-id parsed-html]
   (some->>
-    (sel/select
-      (sel/child
-        (sel/id (format id-string id))
+    (select
+      (child
+        (id (format id-string html-id))
         (sel/class "value"))
       parsed-html)
     first :content rest
@@ -125,25 +155,23 @@
         (repeat (Integer/parseInt %) "colorless")
         %))
     flatten
-    (map str/lower-case)
-    (map #(str/replace % #"\s+" "-"))
-    (map keyword)
+    (map string->keyword)
     frequencies))
 
 (defn- html-rules
-  [id parsed-html]
+  [html-id parsed-html]
   (->>
-    (sel/select
-      (sel/child
-        (sel/id (format id-string id))
+    (select
+      (child
+        (id (format id-string html-id))
         (sel/class "value"))
       parsed-html)
     first :content rest))
 
 (defn card-by-id
-  [id]
+  [card-id]
   (let [parsed
-        (->> id
+        (->> card-id
           (format url)
           slurp
           hick/parse
@@ -157,7 +185,7 @@
      :mana-cost
      (html-mana-cost "mana" parsed)
      :converted-mana-cost
-     (html-name "cmc" parsed)
+     (html-converted-mana-cost "cmc" parsed)
      :types
      (html-types "type" parsed)
      :expansion
