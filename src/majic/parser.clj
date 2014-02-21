@@ -30,6 +30,24 @@
             (string->keyword b)}))
     first))
 
+(defmulti ->string type)
+
+(defmethod ->string String
+  [s]
+  s)
+
+(defmethod ->string clojure.lang.PersistentArrayMap
+  [m]
+  (condp = (:tag m)
+    :div (->string (:content m))
+    :i (->string (:content m))
+    :img (string->keyword (get-in m [:attrs :alt]))
+    m))
+
+(defmethod ->string clojure.lang.PersistentVector
+  [v]
+  (apply str (map ->string v)))
+
 (defn- html-artist
   [html-id parsed-html]
   (some->
@@ -198,5 +216,5 @@
      (html-rarity "rarity" parsed)
      :rules
      (map
-       (fn [elem] (:content elem))
+       ->string
        (html-rules "text" parsed))}))
