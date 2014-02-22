@@ -3,6 +3,8 @@
            [hickory.select :as sel :refer [child id select tag]]
            [clojure.string :as str]))
 
+(declare string->keyword)
+
 (def exp-string
   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol")
 
