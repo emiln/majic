@@ -3,23 +3,23 @@
            [hickory.select :as sel :refer [child id select tag]]
            [clojure.string :as str]))
 
-(def url
-  "http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=%s")
+(def exp-string
+  "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol")
 
 (def id-string
   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_%sRow")
 
-(def exp-string
-  "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol")
+(def url
+  "http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=%s")
 
-(defn- string->keyword
-  [s]
-  (or (some-> s
-        str/lower-case
-        str/trim
-        (str/replace #"\s+" "-")
-        keyword)
-      :unknown))
+(defn- map-rule
+  [rule]
+  (get {"B" ":tap: Add :black to your mana pool."
+        "G" ":tap: Add :green to your mana pool."
+        "R" ":tap: Add :red to your mana pool."
+        "U" ":tap: Add :blue to your mana pool."
+        "W" ":tap: Add :white to your mana pool."}
+       rule rule))
 
 (defn- string->edition
   [s]
@@ -30,11 +30,20 @@
             (string->keyword b)}))
     first))
 
+(defn- string->keyword
+  [s]
+  (or (some-> s
+        str/lower-case
+        str/trim
+        (str/replace #"\s+" "-")
+        keyword)
+      :unknown))
+
 (defmulti ->string type)
 
 (defmethod ->string String
   [s]
-  s)
+  (map-rule s))
 
 (defmethod ->string clojure.lang.PersistentArrayMap
   [m]
@@ -215,7 +224,6 @@
      :artist artist
      :converted-mana-cost converted-mana-cost
      :expansion expansion
-     :expansions expansions
      :flavor flavor
      :mana-cost mana-cost
      :name card-name
