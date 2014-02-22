@@ -197,6 +197,16 @@
       (re-seq #"\w+")
       (map string->keyword))))
 
+(defn all-card-ids
+  []
+  (let [url "http://gatherer.wizards.com/Pages/Search/Default.aspx?output=checklist&action=advanced&rarity=|[R]|[U]|[C]|[L]|[S]|[P]|[M]"]
+    (some->> url
+      slurp
+      (re-seq #"\/Card\/Details.aspx\?multiverseid=(\d+)")
+      (map second)
+      (map #(Integer/parseInt %))
+      (into #{}))))
+
 (defn card-by-id
   [card-id]
   (let [parsed
