@@ -49,76 +49,29 @@
   (apply str (map ->string v)))
 
 (defn- html-artist
-  [html-id parsed-html]
+  [parsed-html]
   (some->
     (select
       (child
-        (id (format id-string html-id))
+        (id (format id-string "artist"))
         (sel/class "value")
         (tag :a))
       parsed-html)
     first :content first str/trim))
 
-(defn- html-name
-  [html-id parsed-html]
-  (some->
-    (select
-      (child
-        (id (format id-string html-id))
-        (sel/class "value"))
-      parsed-html)
-    first :content first str/trim))
-
 (defn- html-converted-mana-cost
-  [html-id parsed-html]
+  [parsed-html]
   (some->
     (select
       (child
-        (id (format id-string html-id))
+        (id (format id-string "cmc"))
         (sel/class "value"))
       parsed-html)
     first :content first str/trim
     (Integer/parseInt)))
 
-(defn- html-types
-  [html-id parsed-html]
-  (into #{}
-    (some->>
-      (select
-        (child
-          (id (format id-string html-id))
-          (sel/class "value"))
-        parsed-html)
-      first :content first str/trim
-      (re-seq #"\w+")
-      (map string->keyword))))
-
-(defn- html-flavor
-  [html-id parsed-html]
-  (some->
-    (select
-      (child
-        (id (format id-string html-id))
-        (sel/class "value")
-        (tag "div")
-        (tag "i"))
-      parsed-html)
-    first :content first str/trim))
-
-(defn- html-power-toughness
-  [html-id parsed-html]
-  (some->>
-    (select
-      (child
-        (id (format id-string html-id))
-        (sel/class "value"))
-      parsed-html)
-    first :content first str/trim
-    (re-seq #"\d")
-    (map #(Integer/parseInt %))))
-
 (defn- html-expansion
-  [html-id parsed-html]
+  [parsed-html]
   (->>
     (map
       (fn [e]
@@ -133,11 +86,11 @@
     first string->keyword))
 
 (defn- html-expansions
-  [html-id parsed-html]
+  [parsed-html]
   (some->>
     (select
       (child
-        (id (format id-string html-id))
+        (id (format id-string "otherSets"))
         (sel/class "value")
         (tag "div"))
       parsed-html)
@@ -146,23 +99,24 @@
     (filter (complement nil?))
     (apply merge)))
 
-(defn- html-rarity
-  [html-id parsed-html]
+(defn- html-flavor
+  [parsed-html]
   (some->
     (select
       (child
-        (id (format id-string html-id))
+        (id (format id-string "flavor"))
         (sel/class "value")
-        (tag :span))
+        (tag "div")
+        (tag "i"))
       parsed-html)
-    first :content first str/trim string->keyword))
+    first :content first str/trim))
 
 (defn- html-mana-cost
-  [html-id parsed-html]
+  [parsed-html]
   (some->>
     (select
       (child
-        (id (format id-string html-id))
+        (id (format id-string "mana"))
         (sel/class "value"))
       parsed-html)
     first :content rest
@@ -176,15 +130,61 @@
     (map string->keyword)
     frequencies))
 
+(defn- html-name
+  [parsed-html]
+  (some->
+    (select
+      (child
+        (id (format id-string "name"))
+        (sel/class "value"))
+      parsed-html)
+    first :content first str/trim))
+
+(defn- html-power-toughness
+  [parsed-html]
+  (some->>
+    (select
+      (child
+        (id (format id-string "pt"))
+        (sel/class "value"))
+      parsed-html)
+    first :content first str/trim
+    (re-seq #"\d")
+    (map #(Integer/parseInt %))))
+
+(defn- html-rarity
+  [parsed-html]
+  (some->
+    (select
+      (child
+        (id (format id-string "rarity"))
+        (sel/class "value")
+        (tag :span))
+      parsed-html)
+    first :content first str/trim string->keyword))
+
 (defn- html-rules
-  [html-id parsed-html]
+  [parsed-html]
   (->>
     (select
       (child
-        (id (format id-string html-id))
+        (id (format id-string "text"))
         (sel/class "value"))
       parsed-html)
     first :content rest))
+
+(defn- html-types
+  [parsed-html]
+  (into #{}
+    (some->>
+      (select
+        (child
+          (id (format id-string "type"))
+          (sel/class "value"))
+        parsed-html)
+      first :content first str/trim
+      (re-seq #"\w+")
+      (map string->keyword))))
 
 (defn card-by-id
   [card-id]
@@ -193,28 +193,34 @@
           (format url)
           slurp
           hick/parse
-          hick/as-hickory)]
-    {:artist
-     (html-artist "artist" parsed)
-     :flavor
-     (html-flavor "flavor" parsed)
-     :name
-     (html-name "name" parsed)
-     :mana-cost
-     (html-mana-cost "mana" parsed)
-     :converted-mana-cost
-     (html-converted-mana-cost "cmc" parsed)
-     :types
-     (html-types "type" parsed)
-     :expansion
-     (html-expansion "set" parsed)
-     :all-sets
-     (html-expansions "otherSets" parsed)
-     :power (first (html-power-toughness "pt" parsed))
-     :toughness (second (html-power-toughness "pt" parsed))
-     :rarity
-     (html-rarity "rarity" parsed)
-     :rules
-     (map
-       ->string
-       (html-rules "text" parsed))}))
+          hick/as-hickory)
+        ;; Used later
+        power-toughness (html-power-toughness parsed)
+        current-set {(html-expansion parsed)
+                     (html-rarity parsed)}
+        ;; Alphabetical
+        artist (html-artist parsed)
+        card-name (html-name parsed)
+        converted-mana-cost (html-converted-mana-cost parsed)
+        expansion (-> current-set first key)
+        expansions (or (html-expansions parsed) current-set)
+        flavor (html-flavor parsed)
+        mana-cost (html-mana-cost parsed)
+        power (first power-toughness)
+        rarity (-> current-set first val)
+        rules (map ->string (html-rules parsed))
+        toughness (second power-toughness)
+        types (html-types parsed)]
+    {:all-sets expansions
+     :artist artist
+     :converted-mana-cost converted-mana-cost
+     :expansion expansion
+     :expansions expansions
+     :flavor flavor
+     :mana-cost mana-cost
+     :name card-name
+     :power power
+     :rarity rarity
+     :toughness toughness
+     :types types
+     :rules rules}))
