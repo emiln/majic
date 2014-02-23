@@ -1,9 +1,10 @@
 (ns majic.parser
-  (require [hickory.core :as hick]
+  (require [majic.util :refer [string->keyword string->int]]
+           [hickory.core :as hick]
            [hickory.select :as sel :refer [child id select tag]]
-           [clojure.string :as str]))
-
-(declare string->keyword)
+           [clojure.string :refer [trim]]
+           [clojure.pprint :refer [pprint]])
+  (import [java.util TimerTask Timer]))
 
 (def exp-string
   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol")
@@ -32,15 +33,6 @@
             (string->keyword b)}))
     first))
 
-(defn- string->keyword
-  [s]
-  (or (some-> s
-        str/lower-case
-        str/trim
-        (str/replace #"\s+" "-")
-        keyword)
-      :unknown))
-
 (defmulti ->string type)
 
 (defmethod ->string String
@@ -59,6 +51,10 @@
   [v]
   (apply str (map ->string v)))
 
+(defmethod ->string nil
+  [n]
+  nil)
+
 (defn- html-artist
   [parsed-html]
   (some->
@@ -68,7 +64,7 @@
         (sel/class "value")
         (tag :a))
       parsed-html)
-    first :content first str/trim))
+    first :content first trim))
 
 (defn- html-converted-mana-cost
   [parsed-html]
@@ -78,8 +74,8 @@
         (id (format id-string "cmc"))
         (sel/class "value"))
       parsed-html)
-    first :content first str/trim
-    (Integer/parseInt)))
+    first :content first trim
+    string->int))
 
 (defn- html-expansion
   [parsed-html]
@@ -120,7 +116,7 @@
         (tag "div")
         (tag "i"))
       parsed-html)
-    first :content first str/trim))
+    first :content first trim))
 
 (defn- html-mana-cost
   [parsed-html]
@@ -135,7 +131,7 @@
     (map :alt)
     (map
       #(if (#{\0 \1 \2 \3 \4 \5 \6 \7 \8 \9} (first %))
-        (repeat (Integer/parseInt %) "colorless")
+        (repeat (string->int %) "colorless")
         %))
     flatten
     (map string->keyword)
@@ -149,7 +145,7 @@
         (id (format id-string "name"))
         (sel/class "value"))
       parsed-html)
-    first :content first str/trim))
+    first :content first trim))
 
 (defn- html-power-toughness
   [parsed-html]
@@ -159,9 +155,9 @@
         (id (format id-string "pt"))
         (sel/class "value"))
       parsed-html)
-    first :content first str/trim
+    first :content first trim
     (re-seq #"\d")
-    (map #(Integer/parseInt %))))
+    (map string->int)))
 
 (defn- html-rarity
   [parsed-html]
@@ -172,11 +168,11 @@
         (sel/class "value")
         (tag :span))
       parsed-html)
-    first :content first str/trim string->keyword))
+    first :content first trim string->keyword))
 
 (defn- html-rules
   [parsed-html]
-  (->>
+  (some->>
     (select
       (child
         (id (format id-string "text"))
@@ -193,7 +189,7 @@
           (id (format id-string "type"))
           (sel/class "value"))
         parsed-html)
-      first :content first str/trim
+      first :content first trim
       (re-seq #"\w+")
       (map string->keyword))))
 
@@ -204,7 +200,7 @@
       slurp
       (re-seq #"\/Card\/Details.aspx\?multiverseid=(\d+)")
       (map second)
-      (map #(Integer/parseInt %))
+      (map string->int)
       (into #{}))))
 
 (defn card-by-id
@@ -229,7 +225,7 @@
         mana-cost (html-mana-cost parsed)
         power (first power-toughness)
         rarity (-> current-set first val)
-        rules (map ->string (html-rules parsed))
+        rules (filter (complement nil?) (map ->string (html-rules parsed)))
         toughness (second power-toughness)
         types (html-types parsed)]
     {:all-sets expansions
@@ -237,6 +233,7 @@
      :converted-mana-cost converted-mana-cost
      :expansion expansion
      :flavor flavor
+     :gatherer-id card-id
      :mana-cost mana-cost
      :name card-name
      :power power
@@ -244,3 +241,39 @@
      :toughness toughness
      :types types
      :rules rules}))
+
+(defn all-cards
+  []
+  (let [counter (atom 0)
+        errors (atom 0)
+        _ (println "Loading card id list...")
+        ids (all-card-ids)
+        id-count (count ids)
+        _ (println "Loaded" id-count "card ids.")
+        mapper (fn [id]
+                 (try
+                   (do
+                     (swap! counter inc)
+                     (card-by-id id))
+                   (catch Exception e
+                     (do
+                       (swap! counter inc)
+                       (println id "failed!")
+                       nil))))
+        mapper-agent (agent nil)
+        logger (fn [_]
+                 (loop []
+                   (println @counter "/" id-count "(" @errors " errors )")
+                   (Thread/sleep 10000)
+                   (when (nil? @mapper-agent)
+                     (recur))))
+        logger-agent (agent nil)]
+    (do
+      (send logger-agent logger)
+      (send mapper-agent (fn [_] (doall (pmap mapper ids))))
+      (await mapper-agent)
+      (println (count @mapper-agent) "/" @counter "succeeded.")
+      (println "Saving cards to file.")
+      (spit "cards.clj" (with-out-str (pprint @mapper-agent)))
+      (println "All is well.")
+      nil)))
