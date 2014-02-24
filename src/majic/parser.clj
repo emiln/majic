@@ -2,7 +2,7 @@
   (require [majic.util :refer [string->keyword string->int]]
            [hickory.core :as hick]
            [hickory.select :as sel :refer [child id select tag]]
-           [clojure.string :refer [trim]]
+           [clojure.string :refer [trim join]]
            [clojure.pprint :refer [pprint]])
   (import [java.util TimerTask Timer]))
 
@@ -10,19 +10,23 @@
   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol")
 
 (def exp-string-left
-  "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_currentSetSymbol")
+  ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_currentSetSymbol"
+   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl09_currentSetSymbol"])
 
 (def exp-string-right
-  "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_currentSetSymbol")
+  ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_currentSetSymbol"
+   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl10_currentSetSymbol"])
 
 (def id-string
   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_%sRow")
 
 (def id-string-left
-  "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_%sRow")
+  ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_%sRow"
+   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl09_%sRow"])
 
 (def id-string-right
-  "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_%sRow")
+  ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_%sRow"
+   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl10_%sRow"])
 
 (def url
   "http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=%s")
@@ -34,12 +38,30 @@
     :right (format id-string-right id)
     (format id-string id)))
 
+(defn- id-selector
+  [html-id & col]
+  (condp = (first col)
+    :left (sel/or (id (format (first id-string-left) html-id))
+                  (id (format (second id-string-left) html-id)))
+    :right (sel/or (id (format (first id-string-right) html-id))
+                   (id (format (second id-string-right) html-id)))
+    (id (format id-string html-id))))
+
 (defn- format-exp
   [& col]
   (condp = (first col)
     :left exp-string-left
     :right exp-string-right
     exp-string))
+
+(defn- exp-selector
+  [& col]
+  (condp = (first col)
+    :left (sel/or (id (first exp-string-left))
+                  (id (second exp-string-left)))
+    :right (sel/or (id (first exp-string-left))
+                   (id (second exp-string-left)))
+    (id exp-string)))
 
 (defn- map-rule
   [rule]
@@ -75,7 +97,7 @@
 
 (defmethod ->string clojure.lang.PersistentVector
   [v]
-  (apply str (map ->string v)))
+  (join (map ->string v)))
 
 (defmethod ->string nil
   [n]
@@ -86,7 +108,7 @@
   (some->
     (select
       (child
-        (id (format-id "artist" (first col)))
+        (id-selector "artist" (first col))
         (sel/class "value")
         (tag :a))
       parsed-html)
@@ -97,7 +119,7 @@
   (some->
     (select
       (child
-        (id (format-id "cmc" (first col)))
+        (id-selector "cmc" (first col))
         (sel/class "value"))
       parsed-html)
     first :content first trim
@@ -112,7 +134,7 @@
           (-> e :content first)))
       (select
         (child
-          (id (format-exp (first col)))
+          (exp-selector (first col))
           (tag :a))
         parsed-html))
     (filter identity)
@@ -123,7 +145,7 @@
   (some->>
     (select
       (child
-        (id (format-id "otherSets" (first col)))
+        (id-selector "otherSets" (first col))
         (sel/class "value")
         (tag "div"))
       parsed-html)
@@ -137,7 +159,7 @@
   (some->
     (select
       (child
-        (id (format-id "flavor" (first col)))
+        (id-selector "flavor" (first col))
         (sel/class "value")
         (tag "div")
         (tag "i"))
@@ -149,7 +171,7 @@
   (some->>
     (select
       (child
-        (id (format-id "mana" (first col)))
+        (id-selector "mana" (first col))
         (sel/class "value"))
       parsed-html)
     first :content rest
@@ -168,7 +190,7 @@
   (some->
     (select
       (child
-        (id (format-id "name" (first col)))
+        (id-selector "name" (first col))
         (sel/class "value"))
       parsed-html)
     first :content first trim))
@@ -178,7 +200,7 @@
   (some->>
     (select
       (child
-        (id (format-id "pt" (first col)))
+        (id-selector "pt" (first col))
         (sel/class "value"))
       parsed-html)
     first :content first trim
@@ -190,7 +212,7 @@
   (some->
     (select
       (child
-        (id (format-id "rarity" (first col)))
+        (id-selector "rarity" (first col))
         (sel/class "value")
         (tag :span))
       parsed-html)
@@ -201,18 +223,18 @@
   (some->>
     (select
       (child
-        (id (format-id "text" (first col)))
+        (id-selector "text" (first col))
         (sel/class "value"))
       parsed-html)
     first :content rest))
 
 (defn- html-types
   [parsed-html & col]
-  (into #{}
+  (set
     (some->>
       (select
         (child
-          (id (format-id "type" (first col)))
+          (id-selector "type" (first col))
           (sel/class "value"))
         parsed-html)
       first :content first trim
@@ -224,7 +246,9 @@
   (some->>
     (select
       (child
-        (id "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_rightCol"))
+        (sel/or
+          (id "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_rightCol")
+          (id "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl09_rightCol")))
       parsed-html)
     empty?))
 
@@ -253,7 +277,7 @@
         mana-cost (html-mana-cost parsed)
         power (first power-toughness)
         rarity (-> current-set first val)
-        rules (filter (complement nil?) (map ->string (html-rules parsed)))
+        rules (remove nil? (map ->string (html-rules parsed)))
         toughness (second power-toughness)
         types (html-types parsed)]
     {:all-sets expansions
@@ -286,7 +310,7 @@
           mana-cost (html-mana-cost parsed col)
           power (first power-toughness)
           rarity (-> current-set first val)
-          rules (filter (complement nil?) (map ->string (html-rules parsed col)))
+          rules (remove nil? (map ->string (html-rules parsed col)))
           toughness (second power-toughness)
           types (html-types parsed col)]
       {:all-sets expansions
@@ -342,12 +366,11 @@
                    (when (nil? @mapper-agent)
                      (recur))))
         logger-agent (agent nil)]
-    (do
-      (send logger-agent logger)
-      (send mapper-agent (fn [_] (doall (pmap mapper ids))))
-      (await mapper-agent)
-      (println (count @mapper-agent) "/" @counter "parsed.")
-      (println "Saving cards to file.")
-      (spit "success-cards.clj" (with-out-str (pprint @mapper-agent)))
-      (spit "failure-cards.clj" (with-out-str (pprint (map :gatherer-id (filter #(nil? (:name %)) @mapper-agent)))))
-      (println "All is well."))))
+    (send logger-agent logger)
+    (send mapper-agent (fn [_] (doall (pmap mapper ids))))
+    (await mapper-agent)
+    (println (count @mapper-agent) "/" @counter "parsed.")
+    (println "Saving cards to file.")
+    (spit "success-cards.clj" (with-out-str (pprint @mapper-agent)))
+    (spit "failure-cards.clj" (with-out-str (pprint (map :gatherer-id (filter #(nil? (:name %)) @mapper-agent)))))
+    (println "All is well.")))
