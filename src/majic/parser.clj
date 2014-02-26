@@ -373,4 +373,5 @@
     (println "Saving cards to file.")
     (spit "success-cards.clj" (with-out-str (pprint @mapper-agent)))
     (spit "failure-cards.clj" (with-out-str (pprint (map :gatherer-id (filter #(nil? (:name %)) @mapper-agent)))))
-    (println "All is well.")))
+    (println "All is well.")
+    (shutdown-agents)))
