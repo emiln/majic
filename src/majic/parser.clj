@@ -1,9 +1,10 @@
 (ns majic.parser
-  (require [majic.util :refer [string->keyword string->int]]
+  (require [majic.util :refer [n-partitions string->keyword string->int]]
            [hickory.core :as hick]
            [hickory.select :as sel :refer [child id select tag]]
            [clojure.string :refer [trim join]]
-           [clojure.pprint :refer [pprint]])
+           [clojure.pprint :refer [pprint]]
+           [clojure.core.async :as async :refer [alts! chan go timeout <! <!! >! >!!]])
   (import [java.util TimerTask Timer]))
 
 (def exp-string
@@ -341,36 +342,34 @@
       (double-card parsed card-id))))
 
 (defn all-cards
-  []
-  (let [counter (atom 0)
-        errors (atom 0)
-        _ (println "Loading card id list...")
-        ids (all-card-ids)
-        id-count (count ids)
-        _ (println "Loaded" id-count "card ids.")
-        mapper (fn [id]
-                 (try
-                   (do
-                     (swap! counter inc)
-                     (card-by-id id))
-                   (catch Exception e
-                     (do
-                       (swap! counter inc)
-                       (println id "failed!")
-                       nil))))
-        mapper-agent (agent nil)
-        logger (fn [_]
-                 (loop []
-                   (println @counter "/" id-count "(" @errors " errors )")
-                   (Thread/sleep 10000)
-                   (when (nil? @mapper-agent)
-                     (recur))))
-        logger-agent (agent nil)]
-    (send logger-agent logger)
-    (send mapper-agent (fn [_] (doall (pmap mapper ids))))
-    (await mapper-agent)
-    (println (count @mapper-agent) "/" @counter "parsed.")
-    (println "Saving cards to file.")
-    (spit "success-cards.clj" (with-out-str (pprint @mapper-agent)))
-    (spit "failure-cards.clj" (with-out-str (pprint (map :gatherer-id (filter #(nil? (:name %)) @mapper-agent)))))
-    (println "All is well.")))
+  [& opts]
+  (let [{:keys [log-fn parallel-limit]} (apply hash-map opts)
+        l-fn (or log-fn println)
+        limit (or parallel-limit 50)
+        chans (repeatedly limit chan)
+        counter (atom 0)
+        total (atom 0)
+        ids (atom 0)
+        log (chan)
+        done (chan 1)]
+    ;; Log everything sent to the log chan.
+    (go (while true
+          (let [msg (<! log)]
+            (l-fn msg))))
+    (>!! log "Downloading list of card IDs. This should take about a minute.")
+    (reset! ids (all-card-ids))
+    (reset! total (count @ids))
+    (>!! log (str "Downloading " @total " cards. This will take a long while."))
+    (go (while true
+          (let [[v ch] (alts! chans)]
+            (if (= @counter @total)
+              (>! done :done)
+              (swap! counter inc)))))
+    (let [partitions (n-partitions limit @ids)]
+      (doseq [part partitions]
+        (async/thread (doall
+          (map #(go (>! %2 (card-by-id %1)))
+            part
+            (cycle chans))))))
+    (let [_ (<!! done)]
+      (>!! log (str "Processed " @counter " cards.")))))

@@ -24,3 +24,8 @@
       (map #(re-seq #"\d+" %))
       flatten
       (map string->int))))
+
+(defn n-partitions
+  "Partitions `coll` into `n` sequences."
+  [n coll]
+  (apply map (fn [& c] (lazy-seq c)) (partition n n (repeat n nil) coll)))
