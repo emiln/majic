@@ -21,6 +21,6 @@
   	  (string->int "") => nil))
   (facts "About n-partitions"
   	(fact "It should partition a small range properly."
-  	  (n-partitions 5 (range 10)) => [[0 5] [1 6] [2 7] [3 8] [4 9]])
+  	  (n-partitions 5 (range 10)) => '((0 5) (1 6) (2 7) (3 8) (4 9)))
   	(fact "It should partition unevenly if necessary."
-  	  (n-partitions 3 (range 10)) => [[0 3 6 9] [1 4 7] [2 5 8]])))
+  	  (n-partitions 3 (range 10)) => '((0 3 6 9) (1 4 7 nil) (2 5 8 nil)))))
