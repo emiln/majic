@@ -2,9 +2,10 @@
   (require [majic.util :refer [n-partitions string->keyword string->int]]
            [hickory.core :as hick]
            [hickory.select :as sel :refer [child id select tag]]
+           [org.httpkit.client :as c]
            [clojure.string :refer [trim join]]
            [clojure.pprint :refer [pprint]]
-           [clojure.core.async :as async :refer [alts! chan go timeout <! <!! >! >!!]])
+           [clojure.core.async :as async :refer [alts! chan close! go go-loop timeout <! <!! >! >!!]])
   (import [java.util TimerTask Timer]))
 
 (def exp-string
@@ -341,35 +342,53 @@
       (single-card parsed card-id)
       (double-card parsed card-id))))
 
+(defn- async-get
+  [url]
+  (c/get url {:timeout 3600000}))
+
+(defn- card-url
+  [id]
+  (format url id))
+
+(defn- parse-card
+  [html-string gatherer-id]
+  (let [parsed (some->> html-string
+                 hick/parse
+                 hick/as-hickory)]   
+    ((if (is-single? parsed) single-card double-card)
+     parsed gatherer-id)))
+
 (defn all-cards
-  [& opts]
-  (let [{:keys [log-fn parallel-limit]} (apply hash-map opts)
-        l-fn (or log-fn println)
-        limit (or parallel-limit 50)
-        chans (repeatedly limit chan)
-        counter (atom 0)
-        total (atom 0)
-        ids (atom 0)
-        log (chan)
-        done (chan 1)]
-    ;; Log everything sent to the log chan.
-    (go (while true
-          (let [msg (<! log)]
-            (l-fn msg))))
-    (>!! log "Downloading list of card IDs. This should take about a minute.")
-    (reset! ids (all-card-ids))
-    (reset! total (count @ids))
-    (>!! log (str "Downloading " @total " cards. This will take a long while."))
-    (go (while true
-          (let [[v ch] (alts! chans)]
-            (if (= @counter @total)
-              (>! done :done)
-              (swap! counter inc)))))
-    (let [partitions (n-partitions limit @ids)]
-      (doseq [part partitions]
-        (async/thread (doall
-          (map #(go (>! %2 (card-by-id %1)))
-            part
-            (cycle chans))))))
-    (let [_ (<!! done)]
-      (>!! log (str "Processed " @counter " cards.")))))
+  "Returns {:channel c, :limit n},
+   where
+   - c is a channel.
+   - n is the number of cards that will be put on the channel.
+
+   Be aware that the channel is not returned until the card IDs have been
+   retrieved, which should take about 70 seconds. The process of putting the
+   cards onto the channel will take several minutes.
+
+   The following example processes all cards by storing them in an atom:
+
+   (require '[majic.parser :refer [all-cards]])
+   (require '[clojure.core.async :refer [<! go-loop]])
+   (let [cards (atom [])
+         channel (:channel (all-cards))]
+     (go-loop []
+       (when-let [card (<! channel)]
+         (swap! cards conj card)
+         (recur)))
+     cards)"
+  []
+  (let [ids (all-card-ids)
+        cards (chan)]
+    (doseq [batch (n-partitions 50 ids)]
+      (go-loop [ids batch]
+        (when-let [id (first ids)]
+          (let [raw (async-get (card-url id))
+                body (:body @raw)
+                card (parse-card body id)]
+            (>! cards card)
+            (recur (rest ids))))))
+    {:total (count ids)
+     :channel cards}))
