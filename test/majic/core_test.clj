@@ -1,7 +1,11 @@
 (ns majic.core-test
   (:require [clojure.test :refer :all]
+  	        [midje.sweet :refer :all]
             [majic.core :refer :all]))
 
-(deftest a-test
-  (testing "FIXME, I fail."
-    (is (= 0 1))))
+(deftest main-test
+  (facts "About the -main function"
+    (fact "It should print a sensible error message when called without arguments."
+      (with-out-str (-main)) => #".+")
+    (fact "It should print a card when called with a card ID."
+      (with-out-str (-main "1234")) => #".+")))
