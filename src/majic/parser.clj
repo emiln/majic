@@ -1,9 +1,11 @@
 (ns majic.parser
-  (require [majic.util :refer [string->keyword string->int]]
+  (require [majic.util :refer [n-partitions string->keyword string->int]]
            [hickory.core :as hick]
            [hickory.select :as sel :refer [child id select tag]]
+           [org.httpkit.client :as c]
            [clojure.string :refer [trim join]]
-           [clojure.pprint :refer [pprint]])
+           [clojure.pprint :refer [pprint]]
+           [clojure.core.async :as async :refer [alts! chan close! go go-loop timeout <! <!! >! >!!]])
   (import [java.util TimerTask Timer]))
 
 (def exp-string
@@ -340,38 +342,53 @@
       (single-card parsed card-id)
       (double-card parsed card-id))))
 
+(defn- async-get
+  [url]
+  (c/get url {:timeout 3600000}))
+
+(defn- card-url
+  [id]
+  (format url id))
+
+(defn- parse-card
+  [html-string gatherer-id]
+  (let [parsed (some->> html-string
+                 hick/parse
+                 hick/as-hickory)]   
+    ((if (is-single? parsed) single-card double-card)
+     parsed gatherer-id)))
+
 (defn all-cards
+  "Returns {:channel c, :limit n},
+   where
+   - c is a channel.
+   - n is the number of cards that will be put on the channel.
+
+   Be aware that the channel is not returned until the card IDs have been
+   retrieved, which should take about 70 seconds. The process of putting the
+   cards onto the channel will take several minutes.
+
+   The following example processes all cards by storing them in an atom:
+
+   (require '[majic.parser :refer [all-cards]])
+   (require '[clojure.core.async :refer [<! go-loop]])
+   (let [cards (atom [])
+         channel (:channel (all-cards))]
+     (go-loop []
+       (when-let [card (<! channel)]
+         (swap! cards conj card)
+         (recur)))
+     cards)"
   []
-  (let [counter (atom 0)
-        errors (atom 0)
-        _ (println "Loading card id list...")
-        ids (all-card-ids)
-        id-count (count ids)
-        _ (println "Loaded" id-count "card ids.")
-        mapper (fn [id]
-                 (try
-                   (do
-                     (swap! counter inc)
-                     (card-by-id id))
-                   (catch Exception e
-                     (do
-                       (swap! counter inc)
-                       (println id "failed!")
-                       nil))))
-        mapper-agent (agent nil)
-        logger (fn [_]
-                 (loop []
-                   (println @counter "/" id-count "(" @errors " errors )")
-                   (Thread/sleep 10000)
-                   (when (nil? @mapper-agent)
-                     (recur))))
-        logger-agent (agent nil)]
-    (send logger-agent logger)
-    (send mapper-agent (fn [_] (doall (pmap mapper ids))))
-    (await mapper-agent)
-    (println (count @mapper-agent) "/" @counter "parsed.")
-    (println "Saving cards to file.")
-    (spit "success-cards.clj" (with-out-str (pprint @mapper-agent)))
-    (spit "failure-cards.clj" (with-out-str (pprint (map :gatherer-id (filter #(nil? (:name %)) @mapper-agent)))))
-    (println "All is well.")
-    (shutdown-agents)))
+  (let [ids (all-card-ids)
+        cards (chan)]
+    (doseq [batch (n-partitions 50 ids)]
+      (go-loop [ids batch]
+        (when-let [id (first ids)]
+          (let [raw (async-get (card-url id))
+                body (:body @raw)
+                card (parse-card body id)]
+            (>! cards card)
+            (recur (rest ids))))))
+    {:total (count ids)
+     :channel cards}))
