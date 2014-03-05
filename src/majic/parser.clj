@@ -8,29 +8,36 @@
            [clojure.core.async :as async :refer [alts! chan close! go go-loop timeout <! <!! >! >!!]])
   (import [java.util TimerTask Timer]))
 
-(def exp-string
+(def ^{:private true}
+  exp-string
   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol")
 
-(def exp-string-left
+(def ^{:private true}
+  exp-string-left
   ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_currentSetSymbol"
    "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl09_currentSetSymbol"])
 
-(def exp-string-right
+(def ^{:private true}
+  exp-string-right
   ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_currentSetSymbol"
    "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl10_currentSetSymbol"])
 
-(def id-string
+(def ^{:private true}
+  id-string
   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_%sRow")
 
-(def id-string-left
+(def ^{:private true}
+  id-string-left
   ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_%sRow"
    "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl09_%sRow"])
 
-(def id-string-right
+(def ^{:private true}
+  id-string-right
   ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_%sRow"
    "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl10_%sRow"])
 
-(def url
+(def ^{:private true}
+  url
   "http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=%s")
 
 (defn- format-id
@@ -83,7 +90,8 @@
             (string->keyword b)}))
     first))
 
-(defmulti ->string type)
+(defmulti ^{:private true}
+  ->string type)
 
 (defmethod ->string String
   [s]
@@ -254,7 +262,7 @@
       parsed-html)
     empty?))
 
-(defn all-card-ids
+(defn- all-card-ids
   []
   (let [url "http://gatherer.wizards.com/Pages/Search/Default.aspx?output=checklist&action=advanced&rarity=|[R]|[U]|[C]|[L]|[S]|[P]|[M]"]
     (some->> url
@@ -330,6 +338,7 @@
        :rules rules})))
 
 (defn card-by-id
+  "Looks up the given card ID in Gatherer and returns the parsed card."
   [card-id]
   (let [parsed
         (->> card-id
