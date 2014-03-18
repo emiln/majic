@@ -34,15 +34,6 @@
     (str "http://gatherer.wizards.com/Pages/Search/Default.aspx?output=checkli"
       "st&action=advanced&rarity=%7C[R]%7C[U]%7C[C]%7C[L]%7C[S]%7C[P]%7C[M]")})
 
-(defn- async-get
-  [url channel rate-limit]
-  (<!! rate-limit)
-  (c/get url {:timeout 3600000}
-    (fn [{:keys [status headers body error]}]
-      (>!! rate-limit :ready)
-      (when-not error
-        (put! channel (parse-card body))))))
-
 (defn- format-id
   [id & col]
   (condp = (first col)
@@ -389,35 +380,44 @@
     ((if (is-single? parsed) single-card double-card)
      parsed)))
 
+(defn- async-get
+  [url channel rate-limit]
+  (<!! rate-limit)
+  (c/get url {:timeout 3600000}
+    (fn [{:keys [status headers body error]}]
+      (>!! rate-limit :ready)
+      (when-not error
+        (put! channel body)))))
+
 (defn all-cards
-  "Returns {:channel c, :limit n},
-   where
-   - c is a channel.
-   - n is the number of cards that will be put on the channel.
+  "Returns a channel onto which all cards from the Gatherer database will be
+   put.
 
-   Be aware that the channel is not returned until the card IDs have been
-   retrieved, which should take about 70 seconds. The process of putting the
-   cards onto the channel will take several minutes.
+   Be aware that although the channel is returned immediately, it will take a
+   minute or so before any cards are actually put onto the channel.
 
-   The following example processes all cards by storing them in an atom:
+   The following example processes all cards by printing each card name:
 
    (require '[majic.parser :refer [all-cards]])
    (require '[clojure.core.async :refer [<! go-loop]])
-   (let [channel (all-cards)
-         counter (atom 0)]
-     (go-loop []
+   (let [channel (all-cards)]
+     (go-loop [counter 1]
        (when-let [card (<! channel)]
-         (swap! counter inc)
-         (recur)))
-     counter)"
+         (println (format \"%05d: %s\" counter
+                          (or (:name card)
+                              (str (:name (first card))
+                                   \" // \"
+                                   (:name (second card))))))
+         (recur (inc counter)))))"
   []
-  (let [id-chan (all-card-ids)
-        card-chan (chan)
-        rate-limit (chan 100)]
-    (dotimes [i 100]
+  (let [limit 100
+        id-chan (all-card-ids)
+        raw-chan (chan)
+        rate-limit (chan limit)]
+    (dotimes [i limit]
       (>!! rate-limit :ready))
     (go-loop []
       (when-let [id (<! id-chan)]
-        (async-get (card-url id) card-chan rate-limit)
+        (async-get (card-url id) raw-chan rate-limit)
         (recur)))
-    card-chan))
+    (map< #(parse-card %) raw-chan)))
