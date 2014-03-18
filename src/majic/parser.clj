@@ -47,9 +47,11 @@
   (>!! logger msg))
 
 (defn- async-get
-  [url channel]
+  [url channel rate-limit]
+  (<!! rate-limit)
   (c/get url {:timeout 3600000}
     (fn [{:keys [status headers body error]}]
+      (>!! rate-limit :ready)
       (if error
         (log (str "FAIL: " error "\n\t" url))
         (put! channel body)))))
@@ -405,11 +407,14 @@
      counter)"
   []
   (let [id-chan (all-card-ids)
-        raw-chan (chan)]
+        raw-chan (chan)
+        rate-limit (chan 100)]
+    (dotimes [i 100]
+      (>!! rate-limit :ready))
     (go-loop [counter 1]
       (when-let [id (<! id-chan)]
         (log (str "PUT: " counter))
-        (async-get (card-url id) raw-chan)
+        (async-get (card-url id) raw-chan rate-limit)
         (recur (inc counter))))
     raw-chan))
   ; (let [id-chan (all-card-ids)
