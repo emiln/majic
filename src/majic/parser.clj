@@ -34,26 +34,13 @@
     (str "http://gatherer.wizards.com/Pages/Search/Default.aspx?output=checkli"
       "st&action=advanced&rarity=%7C[R]%7C[U]%7C[C]%7C[L]%7C[S]%7C[P]%7C[M]")})
 
-(def logger
-  (let [l (chan)]
-    (go-loop []
-      (when-let [msg (<! l)]
-        (spit "error.log" (str msg "\n") :append true)
-        (recur)))
-    l))
-
-(defn log
-  [msg]
-  (>!! logger msg))
-
 (defn- async-get
   [url channel rate-limit]
   (<!! rate-limit)
   (c/get url {:timeout 3600000}
     (fn [{:keys [status headers body error]}]
       (>!! rate-limit :ready)
-      (if error
-        (log (str "FAIL: " error "\n\t" url))
+      (when-not error
         (put! channel body)))))
 
 (defn- format-id
@@ -279,6 +266,11 @@
     empty?))
 
 (defn all-card-ids
+  "Returns a channel onto which all card IDs will eventually be put.
+  
+   Be mindful that fetching all card IDs may take several minutes depending on
+   things like Gatherer's current mood, your internet connection, and the
+   disposition of various Ethernet gods of old."
   []
   (let [in (chan)
         out (chan)]
@@ -413,20 +405,6 @@
       (>!! rate-limit :ready))
     (go-loop [counter 1]
       (when-let [id (<! id-chan)]
-        (log (str "PUT: " counter))
         (async-get (card-url id) raw-chan rate-limit)
         (recur (inc counter))))
     raw-chan))
-  ; (let [id-chan (all-card-ids)
-  ;       raw-chan (chan)
-  ;       card-chan (chan)]
-  ;   (go-loop []
-  ;     (when-let [id (<! id-chan)]
-  ;       (async-get (card-url id) raw-chan)
-  ;       (recur)))
-  ;   (go-loop []
-  ;     (when-let [raw (<! raw-chan)]
-  ;       (>! card-chan
-  ;         (parse-card raw 0))
-  ;       (recur)))
-  ;   card-chan))
