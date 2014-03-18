@@ -41,7 +41,7 @@
     (fn [{:keys [status headers body error]}]
       (>!! rate-limit :ready)
       (when-not error
-        (put! channel body)))))
+        (put! channel (parse-card body))))))
 
 (defn- format-id
   [id & col]
@@ -179,6 +179,17 @@
       parsed-html)
     first :content first trim))
 
+(defn- html-gatherer-id
+  [parsed-html]
+  (some->>
+    (select
+      (sel/tag "form")
+      parsed-html)
+    first :attrs :action
+    (re-seq #"\d+")
+    first
+    string->int))
+
 (defn- html-mana-cost
   [parsed-html & col]
   (some->>
@@ -286,7 +297,7 @@
     out))
 
 (defn- single-card
-  [parsed card-id]
+  [parsed]
   (let [power-toughness (html-power-toughness parsed)
         current-set {(html-expansion parsed)
                      (html-rarity parsed)}
@@ -297,6 +308,7 @@
         expansion (-> current-set first key)
         expansions (or (html-expansions parsed) current-set)
         flavor (html-flavor parsed)
+        gatherer-id (html-gatherer-id parsed)
         mana-cost (html-mana-cost parsed)
         power (first power-toughness)
         rarity (-> current-set first val)
@@ -308,7 +320,7 @@
      :converted-mana-cost converted-mana-cost
      :expansion expansion
      :flavor flavor
-     :gatherer-id card-id
+     :gatherer-id gatherer-id
      :mana-cost mana-cost
      :name card-name
      :power power
@@ -318,7 +330,7 @@
      :rules rules}))
 
 (defn- double-card
-  [parsed card-id]
+  [parsed]
   (for [col [:left :right]]
     (let [power-toughness (html-power-toughness parsed col)
           current-set {(html-expansion parsed col)
@@ -330,6 +342,7 @@
           expansion (-> current-set first key)
           expansions (or (html-expansions parsed col) current-set)
           flavor (html-flavor parsed col)
+          gatherer-id (html-gatherer-id parsed)
           mana-cost (html-mana-cost parsed col)
           power (first power-toughness)
           rarity (-> current-set first val)
@@ -341,7 +354,7 @@
        :converted-mana-cost converted-mana-cost
        :expansion expansion
        :flavor flavor
-       :gatherer-id card-id
+       :gatherer-id gatherer-id
        :mana-cost mana-cost
        :name card-name
        :power power
@@ -361,20 +374,20 @@
           hick/as-hickory)
         is-single (is-single? parsed)]
     (if is-single
-      (single-card parsed card-id)
-      (double-card parsed card-id))))
+      (single-card parsed)
+      (double-card parsed))))
 
 (defn- card-url
   [id]
   (format (:url lookups) id))
 
 (defn- parse-card
-  [html-string gatherer-id]
+  [html-string]
   (let [parsed (some->> html-string
                  hick/parse
                  hick/as-hickory)]   
     ((if (is-single? parsed) single-card double-card)
-     parsed gatherer-id)))
+     parsed)))
 
 (defn all-cards
   "Returns {:channel c, :limit n},
@@ -399,12 +412,12 @@
      counter)"
   []
   (let [id-chan (all-card-ids)
-        raw-chan (chan)
+        card-chan (chan)
         rate-limit (chan 100)]
     (dotimes [i 100]
       (>!! rate-limit :ready))
-    (go-loop [counter 1]
+    (go-loop []
       (when-let [id (<! id-chan)]
-        (async-get (card-url id) raw-chan rate-limit)
-        (recur (inc counter))))
-    raw-chan))
+        (async-get (card-url id) card-chan rate-limit)
+        (recur)))
+    card-chan))
