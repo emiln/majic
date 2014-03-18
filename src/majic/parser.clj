@@ -5,72 +5,86 @@
            [org.httpkit.client :as c]
            [clojure.string :refer [trim join]]
            [clojure.pprint :refer [pprint]]
-           [clojure.core.async :as async :refer [alts! chan close! go go-loop timeout <! <!! >! >!!]])
+           [clojure.core.async :as async :refer [alts! chan close! go go-loop
+             map< map> onto-chan put! timeout <! <!! >! >!!]])
   (import [java.util TimerTask Timer]))
 
 (def ^{:private true}
-  exp-string
-  "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol")
+  lookups
+  "A map containing a lot of ugly strings related to HTML IDs and URLs."
+  {:exp-string
+    "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_currentSetSymbol"
+   :exp-string-left
+    ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_currentSetSymbol"
+     "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl09_currentSetSymbol"]
+   :exp-string-right
+    ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_currentSetSymbol"
+     "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl10_currentSetSymbol"]
+   :id-string
+    "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_%sRow"
+   :id-string-left
+    ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_%sRow"
+     "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl09_%sRow"]
+   :id-string-right
+    ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_%sRow"
+     "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl10_%sRow"]
+   :url
+    "http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=%s"
+   :all-cards-url
+    (str "http://gatherer.wizards.com/Pages/Search/Default.aspx?output=checkli"
+      "st&action=advanced&rarity=%7C[R]%7C[U]%7C[C]%7C[L]%7C[S]%7C[P]%7C[M]")})
 
-(def ^{:private true}
-  exp-string-left
-  ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_currentSetSymbol"
-   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl09_currentSetSymbol"])
+(def logger
+  (let [l (chan)]
+    (go-loop []
+      (when-let [msg (<! l)]
+        (spit "error.log" (str msg "\n") :append true)
+        (recur)))
+    l))
 
-(def ^{:private true}
-  exp-string-right
-  ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_currentSetSymbol"
-   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl10_currentSetSymbol"])
+(defn log
+  [msg]
+  (>!! logger msg))
 
-(def ^{:private true}
-  id-string
-  "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_%sRow")
-
-(def ^{:private true}
-  id-string-left
-  ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl07_%sRow"
-   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl09_%sRow"])
-
-(def ^{:private true}
-  id-string-right
-  ["ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl08_%sRow"
-   "ctl00_ctl00_ctl00_MainContent_SubContent_SubContent_ctl10_%sRow"])
-
-(def ^{:private true}
-  url
-  "http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=%s")
+(defn- async-get
+  [url channel]
+  (c/get url {:timeout 3600000}
+    (fn [{:keys [status headers body error]}]
+      (if error
+        (log (str "FAIL: " error "\n\t" url))
+        (put! channel body)))))
 
 (defn- format-id
   [id & col]
   (condp = (first col)
-    :left (format id-string-left id)
-    :right (format id-string-right id)
-    (format id-string id)))
+    :left (format (:id-string-left lookups) id)
+    :right (format (:id-string-right lookups) id)
+    (format (:id-string lookups) id)))
 
 (defn- id-selector
   [html-id & col]
   (condp = (first col)
-    :left (sel/or (id (format (first id-string-left) html-id))
-                  (id (format (second id-string-left) html-id)))
-    :right (sel/or (id (format (first id-string-right) html-id))
-                   (id (format (second id-string-right) html-id)))
-    (id (format id-string html-id))))
+    :left (sel/or (id (format (first (:id-string-left lookups)) html-id))
+                  (id (format (second (:id-string-left lookups)) html-id)))
+    :right (sel/or (id (format (first (:id-string-right lookups)) html-id))
+                   (id (format (second (:id-string-right lookups)) html-id)))
+    (id (format (:id-string lookups) html-id))))
 
 (defn- format-exp
   [& col]
   (condp = (first col)
-    :left exp-string-left
-    :right exp-string-right
-    exp-string))
+    :left (:exp-string-left lookups)
+    :right (:exp-string-right lookups)
+    (:exp-string lookups)))
 
 (defn- exp-selector
   [& col]
   (condp = (first col)
-    :left (sel/or (id (first exp-string-left))
-                  (id (second exp-string-left)))
-    :right (sel/or (id (first exp-string-left))
-                   (id (second exp-string-left)))
-    (id exp-string)))
+    :left (sel/or (id (first (:exp-string-left lookups)))
+                  (id (second (:exp-string-left lookups))))
+    :right (sel/or (id (first (:exp-string-right lookups)))
+                   (id (second (:exp-string-right lookups))))
+    (id (:exp-string lookups))))
 
 (defn- map-rule
   [rule]
@@ -262,15 +276,20 @@
       parsed-html)
     empty?))
 
-(defn- all-card-ids
+(defn all-card-ids
   []
-  (let [url "http://gatherer.wizards.com/Pages/Search/Default.aspx?output=checklist&action=advanced&rarity=|[R]|[U]|[C]|[L]|[S]|[P]|[M]"]
-    (some->> url
-      slurp
-      (re-seq #"\/Card\/Details.aspx\?multiverseid=(\d+)")
-      (map second)
-      (map string->int)
-      (into #{}))))
+  (let [in (chan)
+        out (chan)]
+    ;(async-get (:all-cards-url lookups) in)
+    (go (>! in (slurp (:all-cards-url lookups))))
+    (go
+      (some->> (<! in)
+        (re-seq #"\/Card\/Details.aspx\?multiverseid=(\d+)")
+        (map second)
+        (map string->int)
+        (into #{})
+        (onto-chan out)))
+    out))
 
 (defn- single-card
   [parsed card-id]
@@ -342,7 +361,7 @@
   [card-id]
   (let [parsed
         (->> card-id
-          (format url)
+          (format (:url lookups))
           slurp
           hick/parse
           hick/as-hickory)
@@ -351,13 +370,9 @@
       (single-card parsed card-id)
       (double-card parsed card-id))))
 
-(defn- async-get
-  [url]
-  (c/get url {:timeout 3600000}))
-
 (defn- card-url
   [id]
-  (format url id))
+  (format (:url lookups) id))
 
 (defn- parse-card
   [html-string gatherer-id]
@@ -381,23 +396,32 @@
 
    (require '[majic.parser :refer [all-cards]])
    (require '[clojure.core.async :refer [<! go-loop]])
-   (let [cards (atom [])
-         channel (:channel (all-cards))]
+   (let [channel (all-cards)
+         counter (atom 0)]
      (go-loop []
        (when-let [card (<! channel)]
-         (swap! cards conj card)
+         (swap! counter inc)
          (recur)))
-     cards)"
+     counter)"
   []
-  (let [ids (all-card-ids)
-        cards (chan)]
-    (doseq [batch (n-partitions 50 ids)]
-      (go-loop [ids batch]
-        (when-let [id (first ids)]
-          (let [raw (async-get (card-url id))
-                body (:body @raw)
-                card (parse-card body id)]
-            (>! cards card)
-            (recur (rest ids))))))
-    {:total (count ids)
-     :channel cards}))
+  (let [id-chan (all-card-ids)
+        raw-chan (chan)]
+    (go-loop [counter 1]
+      (when-let [id (<! id-chan)]
+        (log (str "PUT: " counter))
+        (async-get (card-url id) raw-chan)
+        (recur (inc counter))))
+    raw-chan))
+  ; (let [id-chan (all-card-ids)
+  ;       raw-chan (chan)
+  ;       card-chan (chan)]
+  ;   (go-loop []
+  ;     (when-let [id (<! id-chan)]
+  ;       (async-get (card-url id) raw-chan)
+  ;       (recur)))
+  ;   (go-loop []
+  ;     (when-let [raw (<! raw-chan)]
+  ;       (>! card-chan
+  ;         (parse-card raw 0))
+  ;       (recur)))
+  ;   card-chan))
