@@ -381,13 +381,14 @@
      parsed)))
 
 (defn- async-get
-  [url channel rate-limit]
+  [url success-channel failure-channel rate-limit]
   (<!! rate-limit)
   (c/get url {:timeout 3600000}
     (fn [{:keys [status headers body error]}]
       (>!! rate-limit :ready)
-      (when-not error
-        (put! channel body)))))
+      (if error
+        (put! failure-channel error)
+        (put! success-channel body)))))
 
 (defn all-cards
   "Returns a channel onto which all cards from the Gatherer database will be
@@ -410,14 +411,25 @@
                                    (:name (second card))))))
          (recur (inc counter)))))"
   []
-  (let [limit 100
+  (let [io-limit 10 cpu-limit 50
         id-chan (all-card-ids)
-        raw-chan (chan)
-        rate-limit (chan limit)]
-    (dotimes [i limit]
+        fail-chan (chan cpu-limit)
+        raw-chan (chan cpu-limit)
+        card-chan (chan cpu-limit)
+        rate-limit (chan io-limit)]
+    (dotimes [i io-limit]
       (>!! rate-limit :ready))
     (go-loop []
-      (when-let [id (<! id-chan)]
-        (async-get (card-url id) raw-chan rate-limit)
+      (when-let [fail (<! fail-chan)]
+        (println fail)
         (recur)))
-    (map< #(parse-card %) raw-chan)))
+    (go-loop []
+      (when-let [id (<! id-chan)]
+        (async-get (card-url id) raw-chan fail-chan rate-limit)
+        (recur)))
+    (dotimes [i 4]
+      (go-loop []
+        (when-let [raw (<! raw-chan)]
+          (>! card-chan (parse-card raw))
+          (recur))))
+    card-chan))
