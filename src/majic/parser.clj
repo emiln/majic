@@ -287,42 +287,9 @@
         (onto-chan out)))
     out))
 
-(defn- single-card
+(defn- card
   [parsed]
-  (let [power-toughness (html-power-toughness parsed)
-        current-set {(html-expansion parsed)
-                     (html-rarity parsed)}
-        ;; Alphabetical
-        artist (html-artist parsed)
-        card-name (html-name parsed)
-        converted-mana-cost (html-converted-mana-cost parsed)
-        expansion (-> current-set first key)
-        expansions (or (html-expansions parsed) current-set)
-        flavor (html-flavor parsed)
-        gatherer-id (html-gatherer-id parsed)
-        mana-cost (html-mana-cost parsed)
-        power (first power-toughness)
-        rarity (-> current-set first val)
-        rules (remove nil? (map ->string (html-rules parsed)))
-        toughness (second power-toughness)
-        types (html-types parsed)]
-    {:all-sets expansions
-     :artist artist
-     :converted-mana-cost converted-mana-cost
-     :expansion expansion
-     :flavor flavor
-     :gatherer-id gatherer-id
-     :mana-cost mana-cost
-     :name card-name
-     :power power
-     :rarity rarity
-     :toughness toughness
-     :types types
-     :rules rules}))
-
-(defn- double-card
-  [parsed]
-  (for [col [:left :right]]
+  (for [col (if (is-single? parsed) [nil] [:left :right])]
     (let [power-toughness (html-power-toughness parsed col)
           current-set {(html-expansion parsed col)
                        (html-rarity parsed col)}
@@ -354,20 +321,6 @@
        :types types
        :rules rules})))
 
-(defn card-by-id
-  "Looks up the given card ID in Gatherer and returns the parsed card."
-  [card-id]
-  (let [parsed
-        (->> card-id
-          (format (:url lookups))
-          slurp
-          hick/parse
-          hick/as-hickory)
-        is-single (is-single? parsed)]
-    (if is-single
-      (single-card parsed)
-      (double-card parsed))))
-
 (defn- card-url
   [id]
   (format (:url lookups) id))
@@ -377,8 +330,7 @@
   (let [parsed (some->> html-string
                  hick/parse
                  hick/as-hickory)]   
-    ((if (is-single? parsed) single-card double-card)
-     parsed)))
+    (card parsed)))
 
 (defn- async-get
   [url success-channel failure-channel rate-limit]
@@ -390,28 +342,43 @@
         (put! failure-channel error)
         (put! success-channel body)))))
 
-(defn all-cards
-  "Returns a channel onto which all cards from the Gatherer database will be
-   put.
+(defn card-by-id
+  "Looks up the given card ID in Gatherer and returns the parsed card."
+  [card-id]
+  (let [parsed
+        (->> card-id
+          (format (:url lookups))
+          slurp)]
+    (parse-card parsed)))
 
-   Be aware that although the channel is returned immediately, it will take a
-   minute or so before any cards are actually put onto the channel.
+(defn all-cards
+  "Returns a map containing the following keys:
+
+   -   :cards - A channel onto which all cards are put when fully parsed.
+   -   :errors - A channel onto which any error occuring is put.
+   
+   Be aware that although the channels are returned immediately, it will take
+   at least a minute before any data is actually put onto the channels.
 
    The following example processes all cards by printing each card name:
 
+   ```clojure
    (require '[majic.parser :refer [all-cards]])
    (require '[clojure.core.async :refer [<! go-loop]])
-   (let [channel (all-cards)]
+
+   (defn get-name [card]
+     (or (:name card)
+         (str (:name (first card)) \" // \" (:name (second card)))))
+
+   (let [channel (:cards (all-cards))]
      (go-loop [counter 1]
        (when-let [card (<! channel)]
-         (println (format \"%05d: %s\" counter
-                          (or (:name card)
-                              (str (:name (first card))
-                                   \" // \"
-                                   (:name (second card))))))
-         (recur (inc counter)))))"
+         (println (format \"%05d: %s\" counter (get-name card)))
+         (recur (inc counter)))))
+   ```"
   []
   (let [io-limit 10 cpu-limit 50
+        cpu-count (.. Runtime getRuntime availableProcessors)
         id-chan (all-card-ids)
         fail-chan (chan cpu-limit)
         raw-chan (chan cpu-limit)
@@ -420,16 +387,13 @@
     (dotimes [i io-limit]
       (>!! rate-limit :ready))
     (go-loop []
-      (when-let [fail (<! fail-chan)]
-        (println fail)
-        (recur)))
-    (go-loop []
       (when-let [id (<! id-chan)]
         (async-get (card-url id) raw-chan fail-chan rate-limit)
         (recur)))
-    (dotimes [i 4]
+    (dotimes [i cpu-count]
       (go-loop []
         (when-let [raw (<! raw-chan)]
           (>! card-chan (parse-card raw))
           (recur))))
-    card-chan))
+    {:cards card-chan
+     :errors fail-chan}))
