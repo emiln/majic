@@ -345,11 +345,9 @@
 (defn card-by-id
   "Looks up the given card ID in Gatherer and returns the parsed card."
   [card-id]
-  (let [parsed
-        (->> card-id
-          (format (:url lookups))
-          slurp)]
-    (parse-card parsed)))
+  (some->> card-id
+    (format (:url lookups))
+    c/get deref :body parse-card))
 
 (defn all-cards
   "Returns a map containing the following keys:
@@ -382,7 +380,6 @@
         id-chan (all-card-ids)
         fail-chan (chan cpu-limit)
         raw-chan (chan cpu-limit)
-        card-chan (chan cpu-limit)
         rate-limit (chan io-limit)]
     (dotimes [i io-limit]
       (>!! rate-limit :ready))
@@ -390,10 +387,5 @@
       (when-let [id (<! id-chan)]
         (async-get (card-url id) raw-chan fail-chan rate-limit)
         (recur)))
-    (dotimes [i cpu-count]
-      (go-loop []
-        (when-let [raw (<! raw-chan)]
-          (>! card-chan (parse-card raw))
-          (recur))))
-    {:cards card-chan
+    {:cards (map< parse-card raw-chan)
      :errors fail-chan}))
